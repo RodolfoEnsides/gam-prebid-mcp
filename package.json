@@ -1,0 +1,45 @@
+{
+  "name": "gam-prebid-mcp",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "description": "Safety-first Google Ad Manager and Prebid MCP for audits, plans, and controlled writes.",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "gam-prebid-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm test"
+  },
+  "author": "RodolfoEnsides",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "dotenv": "^17.0.0",
+    "fast-xml-parser": "^5.0.0",
+    "google-auth-library": "^10.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "prettier": "^3.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^4.0.0"
+  }
+}

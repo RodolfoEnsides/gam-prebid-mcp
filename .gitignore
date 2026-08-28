@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+*.pem
+*.p12
+*.key
+*service-account*.json
+*credentials*.json
+.gam-prebid-plans/
+.DS_Store
