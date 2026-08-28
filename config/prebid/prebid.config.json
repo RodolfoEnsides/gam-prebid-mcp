@@ -1,0 +1,17 @@
+{
+  "priceGranularity": {
+    "buckets": [
+      {
+        "max": 3,
+        "increment": 0.01,
+        "precision": 2
+      }
+    ]
+  },
+  "currency": "USD",
+  "targetingKeys": ["hb_pb", "hb_bidder", "hb_adid", "hb_size", "hb_format", "hb_deal"],
+  "universalCreative": {
+    "enabled": true,
+    "require1x1": false
+  }
+}
