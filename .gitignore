@@ -12,3 +12,4 @@ coverage/
 *credentials*.json
 .gam-prebid-plans/
 .DS_Store
+package-lock*

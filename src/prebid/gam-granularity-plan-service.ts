@@ -88,18 +88,6 @@ export class GamGranularityPlanService {
         ),
       );
     }
-    if (audit.order.currencyCode && audit.order.currencyCode !== selected.currency) {
-      conflicts.push(
-        conflict(
-          'HIGH',
-          'ORDER_CURRENCY_MISMATCH',
-          'The selected granularity currency differs from the GAM Order currency.',
-          'order',
-          orderId,
-          { expected: selected.currency, actual: audit.order.currencyCode },
-        ),
-      );
-    }
     if (hbPbKey) {
       for (const lineItem of audit.lineItems) {
         const values = unique(
@@ -385,9 +373,21 @@ function lineItemDifferences(lineItem: LineItem, desired: PlannedLineItemSpec): 
   if (lineItem.priority !== desired.priority) reasons.push('Priority differs.');
   if (lineItem.lineItemType !== desired.lineItemType) reasons.push('Line Item type differs.');
   if (lineItem.costType !== desired.costType) reasons.push('Cost type differs.');
+  if (lineItem.sameAdvertiserExceptionEnabled !== true) {
+    reasons.push('Same advertiser exception is not enabled.');
+  }
   const sizes = new Set(lineItem.sizes.map((size) => size.canonicalName));
   if (desired.creativePlaceholderSizes.some((size) => !sizes.has(size))) {
     reasons.push('Creative placeholder sizes differ.');
+  }
+  if (
+    lineItem.sizes.some(
+      (size) =>
+        desired.creativePlaceholderSizes.includes(size.canonicalName) &&
+        size.expectedCreativeCount !== desired.creativesNeeded,
+    )
+  ) {
+    reasons.push('Expected creative count differs.');
   }
   return reasons;
 }
@@ -400,6 +400,10 @@ function lineItemSnapshot(lineItem: LineItem): Record<string, unknown> {
     lineItemType: lineItem.lineItemType,
     costType: lineItem.costType,
     creativePlaceholderSizes: lineItem.sizes.map((size) => size.canonicalName),
+    expectedCreativeCounts: Object.fromEntries(
+      lineItem.sizes.map((size) => [size.canonicalName, size.expectedCreativeCount]),
+    ),
+    sameAdvertiserExceptionEnabled: lineItem.sameAdvertiserExceptionEnabled,
   };
 }
 

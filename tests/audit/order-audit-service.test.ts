@@ -43,6 +43,20 @@ describe('OrderAuditService', () => {
     expect(result.findings).toEqual([]);
   });
 
+  it('does not compare Line Item currency with the Order network currency', async () => {
+    const result = await new OrderAuditService(
+      readService({
+        listLineItems: vi
+          .fn()
+          .mockResolvedValue(
+            list([{ ...normalLineItem, costPerUnit: { currencyCode: 'USD', micros: '200000' } }]),
+          ),
+      }),
+    ).execute(undefined, '100');
+
+    expect(result.findings.some((finding) => finding.code === 'CURRENCY_MISMATCH')).toBe(false);
+  });
+
   it('reports an empty Order', async () => {
     const read = readService({
       getOrder: vi.fn().mockResolvedValue(emptyOrder),

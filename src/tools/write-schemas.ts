@@ -18,6 +18,7 @@ const sizeSchema = z
   .object({
     width: z.number().int().min(1).max(100_000),
     height: z.number().int().min(1).max(100_000),
+    expectedCreativeCount: z.number().int().min(1).max(100).optional(),
   })
   .strict()
   .transform((value) => ({ ...value, canonicalName: `${value.width}x${value.height}` }));
@@ -57,7 +58,10 @@ const primaryGoalSchema = z
   .object({
     goalType: enumLikeSchema,
     unitType: enumLikeSchema,
-    units: z.string().regex(/^\d+$/).optional(),
+    units: z
+      .string()
+      .regex(/^-?\d+$/)
+      .optional(),
   })
   .strict();
 
@@ -101,6 +105,13 @@ export const lineItemCreateSchema = z
     creativePlaceholderSizes: z.array(sizeSchema).min(1).max(100),
     targeting: targetingSchema,
     primaryGoal: primaryGoalSchema,
+    creativeRotationType: enumLikeSchema.default('OPTIMIZED'),
+    deliveryRateType: enumLikeSchema.default('EVENLY'),
+    deliveryForecastSource: enumLikeSchema.default('HISTORICAL'),
+    roadblockingType: enumLikeSchema.default('ONE_OR_MORE'),
+    environmentType: enumLikeSchema.default('BROWSER'),
+    sameAdvertiserExceptionEnabled: z.boolean().default(false),
+    repeatedCreativeServingEnabled: z.boolean().default(false),
     externalId: externalIdSchema.optional(),
   })
   .strict()
@@ -134,6 +145,13 @@ const lineItemPatchSchema = z
     creativePlaceholderSizes: z.array(sizeSchema).min(1).max(100).optional(),
     targeting: targetingSchema.optional(),
     primaryGoal: primaryGoalSchema.optional(),
+    creativeRotationType: enumLikeSchema.optional(),
+    deliveryRateType: enumLikeSchema.optional(),
+    deliveryForecastSource: enumLikeSchema.optional(),
+    roadblockingType: enumLikeSchema.optional(),
+    environmentType: enumLikeSchema.optional(),
+    sameAdvertiserExceptionEnabled: z.boolean().optional(),
+    repeatedCreativeServingEnabled: z.boolean().optional(),
     externalId: externalIdSchema.optional(),
   })
   .strict()
@@ -194,6 +212,13 @@ export const lineItemCloneSchema = z
         unlimitedEndTime: z.boolean().optional(),
         creativePlaceholderSizes: z.array(sizeSchema).min(1).max(100).optional(),
         targeting: targetingSchema.optional(),
+        creativeRotationType: enumLikeSchema.optional(),
+        deliveryRateType: enumLikeSchema.optional(),
+        deliveryForecastSource: enumLikeSchema.optional(),
+        roadblockingType: enumLikeSchema.optional(),
+        environmentType: enumLikeSchema.optional(),
+        sameAdvertiserExceptionEnabled: z.boolean().optional(),
+        repeatedCreativeServingEnabled: z.boolean().optional(),
       })
       .strict()
       .optional(),

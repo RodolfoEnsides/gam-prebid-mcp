@@ -19,7 +19,7 @@ import type {
   WriteItemResult,
 } from '../models/write-models.js';
 import type { GamWriteRepository, ResourceSnapshot } from '../repositories/write-repository.js';
-import { BulkLimitError } from './write-errors.js';
+import { BulkLimitError, PostWriteVerificationError } from './write-errors.js';
 
 export type GamWriteRepositoryProvider = (networkCode: string) => GamWriteRepository;
 
@@ -168,6 +168,7 @@ export class GamWriteService {
         }
         this.policy.assertWriteExecutionAllowed(false);
         const after = await repository.createLineItem(item);
+        assertLineItemMatches(lineItemDesired(item), after);
         return {
           result: successResult('gam_create_line_item', 'lineItem', false, {
             resourceId: after.id,
@@ -412,6 +413,7 @@ export class GamWriteService {
         }
         this.policy.assertWriteExecutionAllowed(false);
         const after = await repository.cloneLineItem(source, item);
+        assertLineItemMatches(lineItemComparable(applyCloneLineItem(source.resource, item)), after);
         return {
           result: successResult('gam_clone_line_item', 'lineItem', false, {
             resourceId: after.id,
@@ -732,6 +734,13 @@ function failureResult(
   };
 }
 
+function assertLineItemMatches(expected: Record<string, unknown>, actual: LineItem): void {
+  const diff = diffValues(expected, lineItemComparable(actual));
+  if (diff.length > 0) {
+    throw new PostWriteVerificationError(diff.map((item) => item.field));
+  }
+}
+
 function diffValues(before: unknown, proposed: unknown, path = ''): WriteDiff {
   if (stable(before) === stable(proposed)) return [];
   if (isRecord(before) && isRecord(proposed)) {
@@ -831,6 +840,13 @@ function lineItemDesired(input: LineItemCreate): Record<string, unknown> {
     sizes: canonicalSizes(input.creativePlaceholderSizes),
     targeting: canonicalTargeting(input.targeting),
     primaryGoal: input.primaryGoal,
+    creativeRotationType: input.creativeRotationType,
+    deliveryRateType: input.deliveryRateType,
+    deliveryForecastSource: input.deliveryForecastSource,
+    roadblockingType: input.roadblockingType,
+    environmentType: input.environmentType,
+    sameAdvertiserExceptionEnabled: input.sameAdvertiserExceptionEnabled,
+    repeatedCreativeServingEnabled: input.repeatedCreativeServingEnabled,
     externalId: input.externalId,
   };
 }
@@ -849,6 +865,13 @@ function lineItemComparable(value: LineItem): Record<string, unknown> {
     sizes: canonicalSizes(value.sizes),
     targeting: canonicalTargeting(value.targeting),
     primaryGoal: value.primaryGoal,
+    creativeRotationType: value.creativeRotationType,
+    deliveryRateType: value.deliveryRateType,
+    deliveryForecastSource: value.deliveryForecastSource,
+    roadblockingType: value.roadblockingType,
+    environmentType: value.environmentType,
+    sameAdvertiserExceptionEnabled: value.sameAdvertiserExceptionEnabled,
+    repeatedCreativeServingEnabled: value.repeatedCreativeServingEnabled,
     externalId: value.externalId,
   };
 }
@@ -869,6 +892,21 @@ function applyLineItemPatch(lineItem: LineItem, patch: LineItemUpdate['patch']):
       : {}),
     ...(patch.targeting !== undefined ? { targeting: patch.targeting } : {}),
     ...(patch.primaryGoal !== undefined ? { primaryGoal: patch.primaryGoal } : {}),
+    ...(patch.creativeRotationType !== undefined
+      ? { creativeRotationType: patch.creativeRotationType }
+      : {}),
+    ...(patch.deliveryRateType !== undefined ? { deliveryRateType: patch.deliveryRateType } : {}),
+    ...(patch.deliveryForecastSource !== undefined
+      ? { deliveryForecastSource: patch.deliveryForecastSource }
+      : {}),
+    ...(patch.roadblockingType !== undefined ? { roadblockingType: patch.roadblockingType } : {}),
+    ...(patch.environmentType !== undefined ? { environmentType: patch.environmentType } : {}),
+    ...(patch.sameAdvertiserExceptionEnabled !== undefined
+      ? { sameAdvertiserExceptionEnabled: patch.sameAdvertiserExceptionEnabled }
+      : {}),
+    ...(patch.repeatedCreativeServingEnabled !== undefined
+      ? { repeatedCreativeServingEnabled: patch.repeatedCreativeServingEnabled }
+      : {}),
     ...(patch.externalId !== undefined ? { externalId: patch.externalId } : {}),
   };
 }
@@ -911,7 +949,13 @@ function applyCreativePatch(creative: Creative, patch: CreativeUpdate['patch']):
 }
 
 function canonicalSizes(sizes: Size[]): string[] {
-  return sizes.map((size) => size.canonicalName).sort();
+  return sizes
+    .map((size) =>
+      size.expectedCreativeCount === undefined
+        ? size.canonicalName
+        : `${size.canonicalName}#${size.expectedCreativeCount}`,
+    )
+    .sort();
 }
 
 function canonicalTargeting(targeting: TargetingSummary): TargetingSummary {
@@ -926,6 +970,22 @@ function canonicalTargeting(targeting: TargetingSummary): TargetingSummary {
         ...(criterion.operator ? { operator: criterion.operator } : {}),
       }))
       .sort((left, right) => stable(left).localeCompare(stable(right))),
+    ...(targeting.adUnits
+      ? {
+          adUnits: [...targeting.adUnits].sort((left, right) => left.id.localeCompare(right.id)),
+        }
+      : {}),
+    ...(targeting.excludedAdUnits
+      ? {
+          excludedAdUnits: [...targeting.excludedAdUnits].sort((left, right) =>
+            left.id.localeCompare(right.id),
+          ),
+        }
+      : {}),
+    ...(targeting.customTargeting ? { customTargeting: targeting.customTargeting } : {}),
+    ...(targeting.unsupportedPaths
+      ? { unsupportedPaths: [...targeting.unsupportedPaths].sort() }
+      : {}),
   };
 }
 
@@ -937,7 +997,7 @@ function cloneLineItemIdentity(source: LineItem, input: LineItemClone): LineItem
           micros: source.costPerUnit.micros,
         }
       : { currencyCode: 'USD', micros: '0' };
-  return {
+  const identity: LineItemCreate = {
     orderId: input.targetOrderId,
     name: input.name,
     lineItemType: source.lineItemType ?? 'PRICE_PRIORITY',
@@ -954,8 +1014,22 @@ function cloneLineItemIdentity(source: LineItem, input: LineItemClone): LineItem
       unitType: source.primaryGoal?.unitType ?? 'IMPRESSIONS',
       ...(source.primaryGoal?.units ? { units: source.primaryGoal.units } : {}),
     },
+    ...(source.creativeRotationType ? { creativeRotationType: source.creativeRotationType } : {}),
+    ...(source.deliveryRateType ? { deliveryRateType: source.deliveryRateType } : {}),
+    ...(source.deliveryForecastSource
+      ? { deliveryForecastSource: source.deliveryForecastSource }
+      : {}),
+    ...(source.roadblockingType ? { roadblockingType: source.roadblockingType } : {}),
+    ...(source.environmentType ? { environmentType: source.environmentType } : {}),
+    ...(source.sameAdvertiserExceptionEnabled !== undefined
+      ? { sameAdvertiserExceptionEnabled: source.sameAdvertiserExceptionEnabled }
+      : {}),
+    ...(source.repeatedCreativeServingEnabled !== undefined
+      ? { repeatedCreativeServingEnabled: source.repeatedCreativeServingEnabled }
+      : {}),
     ...(input.externalId ? { externalId: input.externalId } : {}),
   };
+  return { ...identity, ...(input.overrides ?? {}) };
 }
 
 function applyCloneLineItem(source: LineItem, input: LineItemClone): LineItem {
@@ -1013,6 +1087,13 @@ function reverseLineItemPatch(lineItem: LineItem, keys: string[]): LineItemUpdat
     creativePlaceholderSizes: lineItem.sizes,
     targeting: lineItem.targeting,
     primaryGoal: lineItem.primaryGoal,
+    creativeRotationType: lineItem.creativeRotationType,
+    deliveryRateType: lineItem.deliveryRateType,
+    deliveryForecastSource: lineItem.deliveryForecastSource,
+    roadblockingType: lineItem.roadblockingType,
+    environmentType: lineItem.environmentType,
+    sameAdvertiserExceptionEnabled: lineItem.sameAdvertiserExceptionEnabled,
+    repeatedCreativeServingEnabled: lineItem.repeatedCreativeServingEnabled,
     externalId: lineItem.externalId ?? '',
   };
   return Object.fromEntries(keys.map((key) => [key, values[key]]));

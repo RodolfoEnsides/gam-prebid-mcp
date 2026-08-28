@@ -71,9 +71,36 @@ describe('Stage 6 application plan builder', () => {
       expect(action.input.targeting.customCriteria).toEqual([
         { keyId: '20', valueIds: ['22'], operator: 'IS' },
       ]);
+      expect(action.input.targeting.customTargeting).toMatchObject({
+        type: 'SET',
+        logicalOperator: 'AND',
+      });
+      expect(action.input.creativePlaceholderSizes).toEqual([
+        { width: 1, height: 1, canonicalName: '1x1', expectedCreativeCount: 1 },
+      ]);
+      expect(action.input.sameAdvertiserExceptionEnabled).toBe(true);
       expect(action.input.externalId).toMatch(/^gpm:/);
     }
     expect(plan.errors).toEqual([]);
     expect(plan.warnings.some((item) => item.startsWith('CREATIVES_NOT_PLANNED'))).toBe(true);
+
+    audit.lineItems[0]!.targeting.unsupportedPaths = ['geoTargeting'];
+    const unsafe = buildStoredPlan(
+      '12345678',
+      {
+        orderId: '100',
+        planning: planningRequest,
+        lineItemTemplate: template,
+        baseLineItemId: '201',
+        creativeStrategy: { mode: 'none' },
+      },
+      audit,
+      gam,
+      86_400_000,
+    );
+    expect(unsafe.create).toEqual([]);
+    expect(unsafe.errors).toContain(
+      'BASE_TARGETING_UNSUPPORTED: The base Line Item contains targeting dimensions that cannot be safely recreated: geoTargeting.',
+    );
   });
 });

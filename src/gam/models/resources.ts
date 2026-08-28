@@ -4,6 +4,7 @@ export type Size = {
   width?: number | undefined;
   height?: number | undefined;
   canonicalName: string;
+  expectedCreativeCount?: number | undefined;
 };
 
 export type Money = {
@@ -16,6 +17,30 @@ export type TargetingSummary = {
   excludedAdUnitIds: string[];
   placementIds: string[];
   customCriteria: CustomCriterion[];
+  adUnits?: AdUnitTarget[] | undefined;
+  excludedAdUnits?: AdUnitTarget[] | undefined;
+  customTargeting?: CustomTargetingNode | undefined;
+  unsupportedPaths?: string[] | undefined;
+};
+
+export type AdUnitTarget = {
+  id: string;
+  includeDescendants: boolean;
+};
+
+export type CustomTargetingNode = CustomTargetingSet | CustomTargetingCriterion;
+
+export type CustomTargetingSet = {
+  type: 'SET';
+  logicalOperator: 'AND' | 'OR';
+  children: CustomTargetingNode[];
+};
+
+export type CustomTargetingCriterion = {
+  type: 'CRITERION';
+  keyId?: string | undefined;
+  valueIds: string[];
+  operator: string;
 };
 
 export type CustomCriterion = {
@@ -64,6 +89,14 @@ export type LineItem = {
     unitType?: string | undefined;
     units?: string | undefined;
   };
+  creativeRotationType?: string | undefined;
+  deliveryRateType?: string | undefined;
+  deliveryForecastSource?: string | undefined;
+  roadblockingType?: string | undefined;
+  environmentType?: string | undefined;
+  sameAdvertiserExceptionEnabled?: boolean | undefined;
+  repeatedCreativeServingEnabled?: boolean | undefined;
+  valueCpm?: Money | undefined;
   sizes: Size[];
   targeting: TargetingSummary;
 };
@@ -114,6 +147,8 @@ export type CustomTargetingValue = {
   id: GamId;
   name: string;
   displayName: string;
+  adTagName?: string | undefined;
+  customTargetingKeyId?: string | undefined;
   status?: string | undefined;
   matchType?: string | undefined;
 };
@@ -122,6 +157,7 @@ export type CustomTargetingKey = {
   id: GamId;
   name: string;
   displayName: string;
+  adTagName?: string | undefined;
   status?: string | undefined;
   type?: string | undefined;
   reportableType?: string | undefined;

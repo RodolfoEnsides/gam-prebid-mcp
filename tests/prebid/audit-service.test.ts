@@ -49,6 +49,10 @@ describe('PrebidAuditService', () => {
       duplicates: 1,
     });
     expect(result.problems.cpm.some((item) => item.code === 'PREBID_CPM_MISMATCH')).toBe(true);
+    expect(result.existing.currency).toBe('USD');
+    expect(result.problems.cpm.some((item) => item.code === 'PREBID_CURRENCY_MISMATCH')).toBe(
+      false,
+    );
     expect(
       result.problems.creative.some(
         (item) => item.code === 'PREBID_UNIVERSAL_CREATIVE_NOT_DETECTED',
@@ -109,7 +113,7 @@ function comparisonFixture(): OrderAuditResult {
       errors: 0,
       partial: false,
     },
-    order: { ...normalOrder, currencyCode: 'USD' },
+    order: normalOrder,
     lineItems,
     creatives: [{ ...normalCreative, prebidUniversalCreative: false }],
     associations,

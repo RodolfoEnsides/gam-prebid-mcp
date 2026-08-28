@@ -124,11 +124,10 @@ export function registerGamReadTools(server: McpServer, dependencies: Dependenci
       annotations: readOnlyAnnotations,
     },
     safeHandler('gam_list_order_line_items', 'lineItem', dependencies, async (input) =>
-      read.listLineItems(
-        input.networkCode,
-        { orderId: input.orderId, ...(input.status ? { status: input.status } : {}) },
-        { ...definedLimit(input.limit), ...definedToken(input.pageToken) },
-      ),
+      read.listOrderLineItems(input.networkCode, input.orderId, input.status, {
+        ...definedLimit(input.limit),
+        ...definedToken(input.pageToken),
+      }),
     ),
   );
 

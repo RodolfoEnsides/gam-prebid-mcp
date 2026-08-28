@@ -1,7 +1,7 @@
 import { GamApiError, RequestTimeoutError } from '../gam/adapters/errors.js';
 import { PrebidConfigInputError } from '../prebid/config-loader.js';
 import { PriceBucketLimitError } from '../prebid/price-bucket-engine.js';
-import { BulkLimitError } from '../gam/services/write-errors.js';
+import { BulkLimitError, PostWriteVerificationError } from '../gam/services/write-errors.js';
 import { PolicyViolationError } from './policy.js';
 import { GranularityApplicationError } from '../prebid/application-errors.js';
 
@@ -21,6 +21,9 @@ export function serializeSafeError(error: unknown): SafeError {
   }
   if (error instanceof BulkLimitError) {
     return { code: 'GAM_BULK_LIMIT', message: error.message };
+  }
+  if (error instanceof PostWriteVerificationError) {
+    return { code: 'POST_WRITE_VERIFICATION_FAILED', message: error.message };
   }
   if (error instanceof GamApiError) {
     return {

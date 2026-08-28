@@ -8,6 +8,7 @@ import {
 } from '../models/normalize.js';
 import type {
   Creative,
+  CustomTargetingNode,
   LineItem,
   LineItemCreativeAssociation,
   Order,
@@ -366,9 +367,25 @@ function lineItemPayload(input: LineItemCreate): Record<string, unknown> {
     unlimitedEndDateTime: input.unlimitedEndTime,
     creativePlaceholders: input.creativePlaceholderSizes.map((size) => ({
       size: sizePayload(size),
+      ...(size.expectedCreativeCount !== undefined
+        ? { expectedCreativeCount: size.expectedCreativeCount }
+        : {}),
     })),
     targeting: targetingPayload(input.targeting),
     primaryGoal: input.primaryGoal,
+    ...(input.creativeRotationType ? { creativeRotationType: input.creativeRotationType } : {}),
+    ...(input.deliveryRateType ? { deliveryRateType: input.deliveryRateType } : {}),
+    ...(input.deliveryForecastSource
+      ? { deliveryForecastSource: input.deliveryForecastSource }
+      : {}),
+    ...(input.roadblockingType ? { roadblockingType: input.roadblockingType } : {}),
+    ...(input.environmentType ? { environmentType: input.environmentType } : {}),
+    ...(input.sameAdvertiserExceptionEnabled !== undefined
+      ? { sameAdvertiserExceptionEnabled: input.sameAdvertiserExceptionEnabled }
+      : {}),
+    ...(input.repeatedCreativeServingEnabled !== undefined
+      ? { repeatedCreativeServingEnabled: input.repeatedCreativeServingEnabled }
+      : {}),
     ...(input.externalId ? { externalId: input.externalId } : {}),
   };
 }
@@ -389,11 +406,29 @@ function lineItemPatch(patch: LineItemUpdate['patch']): Record<string, unknown> 
       ? {
           creativePlaceholders: patch.creativePlaceholderSizes.map((size) => ({
             size: sizePayload(size),
+            ...(size.expectedCreativeCount !== undefined
+              ? { expectedCreativeCount: size.expectedCreativeCount }
+              : {}),
           })),
         }
       : {}),
     ...(patch.targeting !== undefined ? { targeting: targetingPayload(patch.targeting) } : {}),
     ...(patch.primaryGoal !== undefined ? { primaryGoal: patch.primaryGoal } : {}),
+    ...(patch.creativeRotationType !== undefined
+      ? { creativeRotationType: patch.creativeRotationType }
+      : {}),
+    ...(patch.deliveryRateType !== undefined ? { deliveryRateType: patch.deliveryRateType } : {}),
+    ...(patch.deliveryForecastSource !== undefined
+      ? { deliveryForecastSource: patch.deliveryForecastSource }
+      : {}),
+    ...(patch.roadblockingType !== undefined ? { roadblockingType: patch.roadblockingType } : {}),
+    ...(patch.environmentType !== undefined ? { environmentType: patch.environmentType } : {}),
+    ...(patch.sameAdvertiserExceptionEnabled !== undefined
+      ? { sameAdvertiserExceptionEnabled: patch.sameAdvertiserExceptionEnabled }
+      : {}),
+    ...(patch.repeatedCreativeServingEnabled !== undefined
+      ? { repeatedCreativeServingEnabled: patch.repeatedCreativeServingEnabled }
+      : {}),
     ...(patch.externalId !== undefined ? { externalId: patch.externalId } : {}),
   };
 }
@@ -430,36 +465,57 @@ function sizePayload(size: Size) {
   if (size.width === undefined || size.height === undefined) {
     throw new Error('Creative sizes must have numeric width and height.');
   }
-  return { width: size.width, height: size.height, isAspectRatio: false };
+  return {
+    width: size.width,
+    height: size.height,
+    isAspectRatio: false,
+  };
 }
 
 function targetingPayload(targeting: TargetingSummary): Record<string, unknown> {
   return {
     inventoryTargeting: {
-      targetedAdUnits: targeting.adUnitIds.map((adUnitId) => ({
-        adUnitId,
-        includeDescendants: true,
-      })),
-      excludedAdUnits: targeting.excludedAdUnitIds.map((adUnitId) => ({
-        adUnitId,
-        includeDescendants: true,
-      })),
+      targetedAdUnits: (
+        targeting.adUnits ?? targeting.adUnitIds.map((id) => ({ id, includeDescendants: true }))
+      ).map(({ id, includeDescendants }) => ({ adUnitId: id, includeDescendants })),
+      excludedAdUnits: (
+        targeting.excludedAdUnits ??
+        targeting.excludedAdUnitIds.map((id) => ({ id, includeDescendants: true }))
+      ).map(({ id, includeDescendants }) => ({ adUnitId: id, includeDescendants })),
       targetedPlacementIds: targeting.placementIds,
     },
-    ...(targeting.customCriteria.length > 0
-      ? {
-          customTargeting: {
-            __type: 'CustomCriteriaSet',
-            logicalOperator: 'AND',
-            children: targeting.customCriteria.map((criterion) => ({
-              __type: 'CustomCriteria',
-              keyId: criterion.keyId,
-              valueIds: criterion.valueIds,
-              operator: criterion.operator ?? 'IS',
-            })),
-          },
-        }
-      : {}),
+    ...(targeting.customTargeting
+      ? { customTargeting: customTargetingPayload(targeting.customTargeting) }
+      : targeting.customCriteria.length > 0
+        ? {
+            customTargeting: {
+              __type: 'CustomCriteriaSet',
+              logicalOperator: 'AND',
+              children: targeting.customCriteria.map((criterion) => ({
+                __type: 'CustomCriteria',
+                keyId: criterion.keyId,
+                valueIds: criterion.valueIds,
+                operator: criterion.operator ?? 'IS',
+              })),
+            },
+          }
+        : {}),
+  };
+}
+
+function customTargetingPayload(node: CustomTargetingNode): Record<string, unknown> {
+  if (node.type === 'CRITERION') {
+    return {
+      __type: 'CustomCriteria',
+      keyId: node.keyId,
+      valueIds: node.valueIds,
+      operator: node.operator,
+    };
+  }
+  return {
+    __type: 'CustomCriteriaSet',
+    logicalOperator: node.logicalOperator,
+    children: node.children.map(customTargetingPayload),
   };
 }
 

@@ -1,7 +1,9 @@
 import type {
   AdUnit,
+  AdUnitTarget,
   Creative,
   CustomCriterion,
+  CustomTargetingNode,
   CustomTargetingKey,
   CustomTargetingValue,
   LineItem,
@@ -79,6 +81,9 @@ export function normalizeSize(value: unknown): Size | undefined {
     ...(width !== undefined ? { width } : {}),
     ...(height !== undefined ? { height } : {}),
     canonicalName: canonical ?? `${width ?? 'fluid'}x${height ?? 'fluid'}`,
+    ...(numberValue(object.expectedCreativeCount) !== undefined
+      ? { expectedCreativeCount: numberValue(object.expectedCreativeCount) }
+      : {}),
   };
 }
 
@@ -107,35 +112,127 @@ function collectResourceIds(value: unknown, keyPattern: RegExp, excludedPath?: R
   return [...found].sort();
 }
 
-function normalizeCustomCriteria(value: unknown): CustomCriterion[] {
-  const criteria: CustomCriterion[] = [];
-  const visit = (current: unknown) => {
-    const object = asRecord(current);
-    const keyId = stringValue(object.keyId) ?? resourceId(object.customTargetingKey);
-    const rawValues = object.valueIds ?? object.customTargetingValues;
-    if (keyId || rawValues) {
-      criteria.push({
-        ...(keyId ? { keyId } : {}),
-        valueIds: asArray(rawValues)
-          .map(resourceId)
-          .filter((item): item is string => Boolean(item)),
-        ...(stringValue(object.operator) ? { operator: stringValue(object.operator) } : {}),
-      });
-    }
-    Object.values(object).forEach((child) => {
-      if (child !== current && (Array.isArray(child) || typeof child === 'object')) visit(child);
-    });
+function criterionFrom(value: unknown): CustomTargetingNode | undefined {
+  const object = asRecord(value);
+  const keyId = stringValue(object.keyId) ?? resourceId(object.customTargetingKey);
+  const rawValues = object.valueIds ?? object.customTargetingValues;
+  if (!keyId && rawValues === undefined) return undefined;
+  return {
+    type: 'CRITERION',
+    ...(keyId ? { keyId } : {}),
+    valueIds: asArray(rawValues)
+      .map(resourceId)
+      .filter((item): item is string => Boolean(item)),
+    operator:
+      stringValue(object.operator) ?? (booleanValue(object.negative, false) ? 'IS_NOT' : 'IS'),
   };
-  visit(value);
-  return criteria;
+}
+
+function setNode(operator: 'AND' | 'OR', children: CustomTargetingNode[]) {
+  return children.length > 0
+    ? ({ type: 'SET', logicalOperator: operator, children } satisfies CustomTargetingNode)
+    : undefined;
+}
+
+function normalizeSoapCustomTargeting(value: unknown): CustomTargetingNode | undefined {
+  const object = asRecord(value);
+  const criterion = criterionFrom(object);
+  if (criterion) return criterion;
+  const children = asArray(object.children)
+    .map(normalizeSoapCustomTargeting)
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const operator = stringValue(object.logicalOperator);
+  if (operator === 'AND' || operator === 'OR') return setNode(operator, children);
+  return children.length === 1 ? children[0] : setNode('AND', children);
+}
+
+function normalizeRestCustomTargeting(value: unknown): CustomTargetingNode | undefined {
+  const object = asRecord(value);
+  const clauses = asArray(object.customTargetingClauses)
+    .map((clause) => {
+      const literals = asArray(asRecord(clause).customTargetingLiterals)
+        .map(criterionFrom)
+        .filter((item): item is CustomTargetingNode => Boolean(item));
+      return setNode('AND', literals);
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  return clauses.length === 1 ? clauses[0] : setNode('OR', clauses);
+}
+
+function flattenCustomCriteria(value: CustomTargetingNode | undefined): CustomCriterion[] {
+  if (!value) return [];
+  if (value.type === 'CRITERION') {
+    return [
+      {
+        ...(value.keyId ? { keyId: value.keyId } : {}),
+        valueIds: [...value.valueIds],
+        operator: value.operator,
+      },
+    ];
+  }
+  return value.children.flatMap(flattenCustomCriteria);
+}
+
+function normalizeAdUnitTargets(value: unknown): AdUnitTarget[] {
+  return asArray(value)
+    .map((entry) => {
+      const object = asRecord(entry);
+      const id = resourceId(object.adUnit ?? object.adUnitId);
+      return id
+        ? { id, includeDescendants: booleanValue(object.includeDescendants, true) }
+        : undefined;
+    })
+    .filter((item): item is AdUnitTarget => Boolean(item));
+}
+
+function nonEmpty(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  return Object.keys(asRecord(value)).length > 0;
+}
+
+function unsupportedTargetingPaths(value: unknown): string[] {
+  const object = asRecord(value);
+  const unsupported = Object.entries(object)
+    .filter(
+      ([key, child]) => !['inventoryTargeting', 'customTargeting'].includes(key) && nonEmpty(child),
+    )
+    .map(([key]) => key);
+  const custom = asRecord(object.customTargeting);
+  for (const clause of asArray(custom.customTargetingClauses)) {
+    const clauseObject = asRecord(clause);
+    for (const key of ['audienceSegmentTargetings', 'cmsMetadataTargetings']) {
+      if (nonEmpty(clauseObject[key])) unsupported.push(`customTargeting.${key}`);
+    }
+  }
+  return [...new Set(unsupported)].sort();
 }
 
 export function normalizeTargeting(value: unknown): TargetingSummary {
+  const object = asRecord(value);
+  const inventory = asRecord(object.inventoryTargeting);
+  const adUnits = normalizeAdUnitTargets(inventory.targetedAdUnits);
+  const excludedAdUnits = normalizeAdUnitTargets(inventory.excludedAdUnits);
+  const restCustom = asRecord(object.customTargeting).customTargetingClauses;
+  const customTargeting = restCustom
+    ? normalizeRestCustomTargeting(object.customTargeting)
+    : normalizeSoapCustomTargeting(object.customTargeting);
   return {
-    adUnitIds: collectResourceIds(value, /^(adUnit|targetedAdUnits)$/i, /excludedAdUnits/i),
-    excludedAdUnitIds: collectResourceIds(value, /excludedAdUnits/i),
-    placementIds: collectResourceIds(value, /(placement|targetedPlacements)/i),
-    customCriteria: normalizeCustomCriteria(asRecord(value).customTargeting),
+    adUnitIds:
+      adUnits.length > 0
+        ? adUnits.map((item) => item.id).sort()
+        : collectResourceIds(value, /^(adUnit|adUnitId)$/i, /excludedAdUnits/i),
+    excludedAdUnitIds:
+      excludedAdUnits.length > 0
+        ? excludedAdUnits.map((item) => item.id).sort()
+        : collectResourceIds(inventory.excludedAdUnits, /^(adUnit|adUnitId)$/i),
+    placementIds: collectResourceIds(value, /(placement|targetedPlacements|targetedPlacementIds)/i),
+    customCriteria: flattenCustomCriteria(customTargeting),
+    ...(adUnits.length > 0 ? { adUnits } : {}),
+    ...(excludedAdUnits.length > 0 ? { excludedAdUnits } : {}),
+    ...(customTargeting ? { customTargeting } : {}),
+    ...(unsupportedTargetingPaths(value).length > 0
+      ? { unsupportedPaths: unsupportedTargetingPaths(value) }
+      : {}),
   };
 }
 
@@ -181,8 +278,13 @@ export function normalizeLineItem(value: unknown): LineItem {
   const object = asRecord(value);
   const name = stringValue(object.name) ?? '';
   const order = stringValue(object.order) ?? '';
-  const cost = asRecord(object.costPerUnit);
+  // REST v1 names the Line Item billing amount `rate`, while SOAP names the
+  // same value `costPerUnit`. Reads use REST and writes use SOAP, so normalize
+  // both representations into the shared model.
+  const cost = asRecord(object.rate ?? object.costPerUnit);
   const micros = normalizeMoneyMicros(cost);
+  const valueCpm = asRecord(object.valueCpm);
+  const goal = asRecord(object.goal ?? object.primaryGoal);
   return {
     id: stringValue(object.lineItemId) ?? resourceId(name) ?? '',
     name,
@@ -210,29 +312,64 @@ export function normalizeLineItem(value: unknown): LineItem {
     ...(dateTimeValue(object.startTime ?? object.startDateTime)
       ? { startTime: dateTimeValue(object.startTime ?? object.startDateTime) }
       : {}),
-    ...(dateTimeValue(object.endTime ?? object.endDateTime)
-      ? { endTime: dateTimeValue(object.endTime ?? object.endDateTime) }
+    ...(dateTimeValue(object.targetEndTime ?? object.endTime ?? object.endDateTime)
+      ? { endTime: dateTimeValue(object.targetEndTime ?? object.endTime ?? object.endDateTime) }
       : {}),
-    archived: booleanValue(object.archived),
-    missingCreatives: booleanValue(object.missingCreatives),
-    ...(stringValue(object.externalId) ? { externalId: stringValue(object.externalId) } : {}),
-    ...(object.unlimitedEndDateTime !== undefined || object.unlimitedEndTime !== undefined
+    archived: booleanValue(object.archived ?? object.isArchived),
+    missingCreatives: booleanValue(object.missingCreatives ?? object.isMissingCreatives),
+    ...(stringValue(object.externalLineItemId ?? object.externalId)
+      ? { externalId: stringValue(object.externalLineItemId ?? object.externalId) }
+      : {}),
+    ...(object.endTimeUnlimited !== undefined ||
+    object.unlimitedEndDateTime !== undefined ||
+    object.unlimitedEndTime !== undefined
       ? {
-          unlimitedEndTime: booleanValue(object.unlimitedEndDateTime ?? object.unlimitedEndTime),
+          unlimitedEndTime: booleanValue(
+            object.endTimeUnlimited ?? object.unlimitedEndDateTime ?? object.unlimitedEndTime,
+          ),
         }
       : {}),
-    ...(Object.keys(asRecord(object.primaryGoal)).length > 0
+    ...(Object.keys(goal).length > 0
       ? {
           primaryGoal: {
-            ...(stringValue(asRecord(object.primaryGoal).goalType)
-              ? { goalType: stringValue(asRecord(object.primaryGoal).goalType) }
+            ...(stringValue(goal.goalType) ? { goalType: stringValue(goal.goalType) } : {}),
+            ...(stringValue(goal.unitType) ? { unitType: stringValue(goal.unitType) } : {}),
+            ...(stringValue(goal.units) ? { units: stringValue(goal.units) } : {}),
+          },
+        }
+      : {}),
+    ...(stringValue(object.creativeRotationType)
+      ? { creativeRotationType: stringValue(object.creativeRotationType) }
+      : {}),
+    ...(stringValue(object.deliveryRateType)
+      ? { deliveryRateType: stringValue(object.deliveryRateType) }
+      : {}),
+    ...(stringValue(object.deliveryForecastSource)
+      ? { deliveryForecastSource: stringValue(object.deliveryForecastSource) }
+      : {}),
+    ...(stringValue(object.roadblockingType)
+      ? { roadblockingType: stringValue(object.roadblockingType) }
+      : {}),
+    ...(stringValue(object.environmentType)
+      ? { environmentType: stringValue(object.environmentType) }
+      : {}),
+    ...(object.sameAdvertiserExceptionEnabled !== undefined
+      ? {
+          sameAdvertiserExceptionEnabled: booleanValue(object.sameAdvertiserExceptionEnabled),
+        }
+      : {}),
+    ...(object.repeatedCreativeServingEnabled !== undefined
+      ? {
+          repeatedCreativeServingEnabled: booleanValue(object.repeatedCreativeServingEnabled),
+        }
+      : {}),
+    ...(Object.keys(valueCpm).length > 0
+      ? {
+          valueCpm: {
+            ...(stringValue(valueCpm.currencyCode)
+              ? { currencyCode: stringValue(valueCpm.currencyCode) }
               : {}),
-            ...(stringValue(asRecord(object.primaryGoal).unitType)
-              ? { unitType: stringValue(asRecord(object.primaryGoal).unitType) }
-              : {}),
-            ...(stringValue(asRecord(object.primaryGoal).units)
-              ? { units: stringValue(asRecord(object.primaryGoal).units) }
-              : {}),
+            ...(normalizeMoneyMicros(valueCpm) ? { micros: normalizeMoneyMicros(valueCpm) } : {}),
           },
         }
       : {}),
@@ -352,6 +489,10 @@ export function normalizeCustomTargetingValue(value: unknown): CustomTargetingVa
     id: stringValue(object.customTargetingValueId ?? object.id) ?? resourceId(name) ?? '',
     name,
     displayName: stringValue(object.displayName ?? object.name) ?? '',
+    ...(stringValue(object.adTagName) ? { adTagName: stringValue(object.adTagName) } : {}),
+    ...(resourceId(object.customTargetingKey)
+      ? { customTargetingKeyId: resourceId(object.customTargetingKey) }
+      : {}),
     ...(stringValue(object.status) ? { status: stringValue(object.status) } : {}),
     ...(stringValue(object.matchType) ? { matchType: stringValue(object.matchType) } : {}),
   };
@@ -364,6 +505,7 @@ export function normalizeCustomTargetingKey(value: unknown): CustomTargetingKey 
     id: stringValue(object.customTargetingKeyId ?? object.id) ?? resourceId(name) ?? '',
     name,
     displayName: stringValue(object.displayName ?? object.name) ?? '',
+    ...(stringValue(object.adTagName) ? { adTagName: stringValue(object.adTagName) } : {}),
     ...(stringValue(object.status) ? { status: stringValue(object.status) } : {}),
     ...(stringValue(object.type) ? { type: stringValue(object.type) } : {}),
     ...(stringValue(object.reportableType)

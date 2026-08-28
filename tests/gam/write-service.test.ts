@@ -108,6 +108,30 @@ describe('GamWriteService', () => {
     expect(createLineItem).not.toHaveBeenCalled();
   });
 
+  it('fails safely when GAM returns a Line Item with different critical fields', async () => {
+    const repository = {
+      getOrder: async () => ({ resource: normalOrder, raw: {} }),
+      findLineItem: async () => undefined,
+      createLineItem: async () => ({
+        ...normalLineItem,
+        id: '777',
+        displayName: 'Prebid 1.00',
+        orderId: '100',
+        costPerUnit: { currencyCode: 'BRL', micros: '1000000' },
+      }),
+    } as unknown as GamWriteRepository;
+    const service = writeService(repository, { readOnly: false, dryRun: false });
+
+    const result = await service.createLineItems(
+      [lineItemCreate({ orderId: '100' })],
+      options(false),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.results[0]?.errors[0]).toContain('POST_WRITE_VERIFICATION_FAILED');
+    expect(result.results[0]?.errors[0]).toContain('costPerUnit.currencyCode');
+  });
+
   it('rejects bulk operations over their configured ceiling', async () => {
     const repository = {} as GamWriteRepository;
     const service = writeService(repository, { maxBulkCreate: 1 });

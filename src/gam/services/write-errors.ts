@@ -7,3 +7,10 @@ export class BulkLimitError extends Error {
     this.name = 'BulkLimitError';
   }
 }
+
+export class PostWriteVerificationError extends Error {
+  constructor(readonly fields: string[]) {
+    super(`GAM returned a Line Item that differs in critical fields: ${fields.join(', ')}.`);
+    this.name = 'PostWriteVerificationError';
+  }
+}

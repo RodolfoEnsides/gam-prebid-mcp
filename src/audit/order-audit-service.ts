@@ -51,7 +51,7 @@ export class OrderAuditService {
       );
     }
     inspectOrder(order.status, orderId, lineItems, findings);
-    inspectLineItems(lineItems, order.currencyCode, findings);
+    inspectLineItems(lineItems, findings);
     inspectApparentDuplicates(lineItems, findings);
     const customTargeting = await this.loadCustomTargeting(networkCode, lineItems, findings, cache);
     inspectCustomTargeting(lineItems, customTargeting, findings);
@@ -102,19 +102,31 @@ export class OrderAuditService {
     findings: AuditFinding[],
     cache: ExecutionCache,
   ): Promise<CustomTargetingKey[]> {
-    const keyIds = [
-      ...new Set(
+    const pairs = [
+      ...new Map(
         lineItems.flatMap((item) =>
-          item.targeting.customCriteria
-            .map((criterion) => criterion.keyId)
-            .filter((id): id is string => Boolean(id)),
+          item.targeting.customCriteria.flatMap((criterion) =>
+            criterion.keyId
+              ? criterion.valueIds.map(
+                  (valueId) =>
+                    [
+                      `${criterion.keyId}:${valueId}`,
+                      { keyId: criterion.keyId as string, valueId },
+                    ] as const,
+                )
+              : [],
+          ),
         ),
-      ),
+      ).values(),
     ];
-    const results = await mapConcurrent(keyIds, this.read.concurrency(), async (id) => {
+    const results = await mapConcurrent(pairs, this.read.concurrency(), async (pair) => {
       try {
-        const result = await cache.getOrLoad(`custom-targeting:${id}`, () =>
-          this.read.getCustomTargeting(networkCode, { id }, this.read.auditOptions()),
+        const result = await cache.getOrLoad(`custom-targeting:${pair.keyId}:${pair.valueId}`, () =>
+          this.read.getCustomTargeting(
+            networkCode,
+            { id: pair.keyId, customTargetingValueId: pair.valueId },
+            { limit: 1 },
+          ),
         );
         return result.items;
       } catch {
@@ -124,13 +136,24 @@ export class OrderAuditService {
             'PARTIAL_CUSTOM_TARGETING',
             'A Custom Targeting key could not be read.',
             'customTargetingKey',
-            id,
+            pair.keyId,
           ),
         );
         return [];
       }
     });
-    return results.flat();
+    const byId = new Map<string, CustomTargetingKey>();
+    for (const key of results.flat()) {
+      const existing = byId.get(key.id);
+      if (!existing) {
+        byId.set(key.id, { ...key, values: [...key.values] });
+        continue;
+      }
+      existing.values = [
+        ...new Map([...existing.values, ...key.values].map((value) => [value.id, value])).values(),
+      ];
+    }
+    return [...byId.values()];
   }
 
   private async loadAssociations(
@@ -211,11 +234,7 @@ function inspectOrder(
   }
 }
 
-function inspectLineItems(
-  lineItems: LineItem[],
-  orderCurrency: string | undefined,
-  findings: AuditFinding[],
-): void {
+function inspectLineItems(lineItems: LineItem[], findings: AuditFinding[]): void {
   for (const lineItem of lineItems) {
     if (lineItem.status === 'PAUSED') {
       findings.push(
@@ -283,25 +302,6 @@ function inspectLineItems(
           'CPM Line Item has no cost per unit.',
           'lineItem',
           lineItem.id,
-        ),
-      );
-    }
-    if (
-      orderCurrency &&
-      lineItem.costPerUnit?.currencyCode &&
-      orderCurrency !== lineItem.costPerUnit.currencyCode
-    ) {
-      findings.push(
-        finding(
-          'HIGH',
-          'CURRENCY_MISMATCH',
-          'Line Item currency differs from Order currency.',
-          'lineItem',
-          lineItem.id,
-          {
-            orderCurrency,
-            lineItemCurrency: lineItem.costPerUnit.currencyCode,
-          },
         ),
       );
     }

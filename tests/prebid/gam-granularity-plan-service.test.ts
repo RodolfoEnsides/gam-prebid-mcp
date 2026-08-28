@@ -49,6 +49,7 @@ describe('GamGranularityPlanService', () => {
     });
     expect(result.lineItemsToCreate[0]).toMatchObject({
       hbPb: '1.00',
+      cpm: { currencyCode: 'USD', micros: '1000000', value: '1.00' },
       priority: 12,
       lineItemType: 'PRICE_PRIORITY',
       creativePlaceholderSizes: ['1x1'],
@@ -108,7 +109,7 @@ function gamPlanFixture(): OrderAuditResult {
       errors: 0,
       partial: false,
     },
-    order: { ...normalOrder, currencyCode: 'USD' },
+    order: normalOrder,
     lineItems,
     creatives: [{ ...normalCreative, id: '400', sizes: [size()] }],
     associations: [{ lineItemId: '202', creativeId: '400', status: 'ACTIVE', sizes: [size()] }],
@@ -141,9 +142,10 @@ function lineItem(id: string, valueId: string, cpm: string, prebid: boolean): Li
     priority: 12,
     costType: 'CPM',
     costPerUnit: { currencyCode: 'USD', micros: String(Number(cpm) * 1_000_000) },
+    sameAdvertiserExceptionEnabled: true,
     archived: false,
     missingCreatives: false,
-    sizes: [size()],
+    sizes: [{ ...size(), expectedCreativeCount: 2 }],
     targeting: {
       adUnitIds: [],
       excludedAdUnitIds: [],

@@ -63,6 +63,11 @@ export class PrebidAuditService {
     const targeting = targetingIndex(audit.customTargeting);
     const hbPb = targeting.byName.get('hb_pb');
     const lineItemBuckets = extractLineItemBuckets(audit.lineItems, hbPb, targeting.valuesById);
+    const observedCurrencies = unique(
+      audit.lineItems
+        .map((lineItem) => lineItem.costPerUnit?.currencyCode)
+        .filter((currency): currency is string => currency !== undefined),
+    );
     const existingValues = unique(lineItemBuckets.flatMap((entry) => entry.values));
     const expectedSet = new Set(generated.values);
     const existingSet = new Set(existingValues);
@@ -83,17 +88,6 @@ export class PrebidAuditService {
         audit.associations,
       ),
     };
-    if (audit.order.currencyCode && audit.order.currencyCode !== request.config.currency) {
-      problems.cpm.push(
-        finding(
-          'HIGH',
-          'PREBID_CURRENCY_MISMATCH',
-          `Order currency ${audit.order.currencyCode} differs from Prebid currency ${request.config.currency}.`,
-          'order',
-          audit.order.id,
-        ),
-      );
-    }
     const findings = Object.values(problems).flat();
     const partial = audit.summary.partial;
 
@@ -123,7 +117,7 @@ export class PrebidAuditService {
         rounding: generated.rounding,
       },
       existing: {
-        ...(audit.order.currencyCode ? { currency: audit.order.currencyCode } : {}),
+        ...(observedCurrencies.length === 1 ? { currency: observedCurrencies[0] } : {}),
         bucketCount: existingValues.length,
         lineItems: audit.lineItems.length,
         creatives: audit.creatives.length,

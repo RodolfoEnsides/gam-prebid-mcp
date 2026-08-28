@@ -1,5 +1,10 @@
 import type { OrderAuditResult } from '../audit/models.js';
-import type { LineItem, Size, TargetingSummary } from '../gam/models/resources.js';
+import type {
+  CustomTargetingNode,
+  LineItem,
+  Size,
+  TargetingSummary,
+} from '../gam/models/resources.js';
 import type {
   LineItemCreate,
   LineItemUpdate,
@@ -172,6 +177,19 @@ function createLineItem(
     errors.push(`TARGETING_UNRESOLVED: GAM ids for hb_pb=${spec.hbPb} were not resolved.`);
     return undefined;
   }
+  if ((base.targeting.unsupportedPaths?.length ?? 0) > 0) {
+    errors.push(
+      `BASE_TARGETING_UNSUPPORTED: The base Line Item contains targeting dimensions that cannot be safely recreated: ${base.targeting.unsupportedPaths?.join(', ')}.`,
+    );
+    return undefined;
+  }
+  const targeting = replaceHbPb(base.targeting, spec.targeting.keyId, spec.targeting.valueId);
+  if (!targeting) {
+    errors.push(
+      'BASE_HB_PB_TARGETING_AMBIGUOUS: The base Line Item must contain exactly one positive hb_pb criterion.',
+    );
+    return undefined;
+  }
   return {
     orderId,
     name: spec.name,
@@ -182,13 +200,23 @@ function createLineItem(
     startTime: base.startTime,
     ...(base.endTime ? { endTime: base.endTime } : {}),
     unlimitedEndTime: base.unlimitedEndTime ?? false,
-    creativePlaceholderSizes: spec.creativePlaceholderSizes.map(size),
-    targeting: replaceHbPb(base.targeting, spec.targeting.keyId, spec.targeting.valueId),
+    creativePlaceholderSizes: spec.creativePlaceholderSizes.map((value) => ({
+      ...size(value),
+      expectedCreativeCount: spec.creativesNeeded,
+    })),
+    targeting,
     primaryGoal: {
       goalType: base.primaryGoal.goalType,
       unitType: base.primaryGoal.unitType,
       ...(base.primaryGoal.units ? { units: base.primaryGoal.units } : {}),
     },
+    creativeRotationType: base.creativeRotationType ?? 'OPTIMIZED',
+    deliveryRateType: base.deliveryRateType ?? 'EVENLY',
+    deliveryForecastSource: base.deliveryForecastSource ?? 'HISTORICAL',
+    roadblockingType: base.roadblockingType ?? 'ONE_OR_MORE',
+    environmentType: base.environmentType ?? 'BROWSER',
+    sameAdvertiserExceptionEnabled: true,
+    repeatedCreativeServingEnabled: base.repeatedCreativeServingEnabled ?? false,
     externalId: externalId(planId, 'li', spec.hbPb),
   };
 }
@@ -201,7 +229,11 @@ function updateLineItem(lineItemId: string, spec: PlannedLineItemSpec): LineItem
       priority: spec.priority,
       costType: 'CPM',
       costPerUnit: { currencyCode: spec.cpm.currencyCode, micros: spec.cpm.micros },
-      creativePlaceholderSizes: spec.creativePlaceholderSizes.map(size),
+      creativePlaceholderSizes: spec.creativePlaceholderSizes.map((value) => ({
+        ...size(value),
+        expectedCreativeCount: spec.creativesNeeded,
+      })),
+      sameAdvertiserExceptionEnabled: true,
     },
   };
 }
@@ -330,18 +362,73 @@ function replaceHbPb(
   targeting: TargetingSummary,
   keyId: string,
   valueId: string,
-): TargetingSummary {
+): TargetingSummary | undefined {
+  const sourceTree =
+    targeting.customTargeting ??
+    (targeting.customCriteria.length > 0
+      ? {
+          type: 'SET' as const,
+          logicalOperator: 'AND' as const,
+          children: targeting.customCriteria.map((criterion) => ({
+            type: 'CRITERION' as const,
+            ...(criterion.keyId ? { keyId: criterion.keyId } : {}),
+            valueIds: [...criterion.valueIds],
+            operator: criterion.operator ?? 'IS',
+          })),
+        }
+      : undefined);
+  if (!sourceTree) return undefined;
+  const matches = countCriteria(sourceTree, keyId);
+  if (matches !== 1) return undefined;
+  const customTargeting = replaceCriterion(sourceTree, keyId, valueId);
+  if (!customTargeting) return undefined;
   return {
     adUnitIds: [...targeting.adUnitIds],
     excludedAdUnitIds: [...targeting.excludedAdUnitIds],
     placementIds: [...targeting.placementIds],
-    customCriteria: [
-      ...targeting.customCriteria
-        .filter((criterion) => criterion.keyId !== keyId)
-        .map((criterion) => ({ ...criterion, valueIds: [...criterion.valueIds] })),
-      { keyId, valueIds: [valueId], operator: 'IS' },
-    ],
+    customCriteria: flattenCriteria(customTargeting),
+    ...(targeting.adUnits ? { adUnits: targeting.adUnits.map((item) => ({ ...item })) } : {}),
+    ...(targeting.excludedAdUnits
+      ? { excludedAdUnits: targeting.excludedAdUnits.map((item) => ({ ...item })) }
+      : {}),
+    customTargeting,
+    ...(targeting.unsupportedPaths ? { unsupportedPaths: [...targeting.unsupportedPaths] } : {}),
   };
+}
+
+function countCriteria(node: CustomTargetingNode, keyId: string): number {
+  if (node.type === 'CRITERION') {
+    return node.keyId === keyId && node.operator === 'IS' ? 1 : 0;
+  }
+  return node.children.reduce((total, child) => total + countCriteria(child, keyId), 0);
+}
+
+function replaceCriterion(
+  node: CustomTargetingNode,
+  keyId: string,
+  valueId: string,
+): CustomTargetingNode | undefined {
+  if (node.type === 'CRITERION') {
+    if (node.keyId !== keyId) return { ...node, valueIds: [...node.valueIds] };
+    if (node.operator !== 'IS') return undefined;
+    return { ...node, valueIds: [valueId] };
+  }
+  const children = node.children.map((child) => replaceCriterion(child, keyId, valueId));
+  if (children.some((child) => child === undefined)) return undefined;
+  return { ...node, children: children as CustomTargetingNode[] };
+}
+
+function flattenCriteria(node: CustomTargetingNode): TargetingSummary['customCriteria'] {
+  if (node.type === 'CRITERION') {
+    return [
+      {
+        ...(node.keyId ? { keyId: node.keyId } : {}),
+        valueIds: [...node.valueIds],
+        operator: node.operator,
+      },
+    ];
+  }
+  return node.children.flatMap(flattenCriteria);
 }
 
 function validateCreativeSizes(

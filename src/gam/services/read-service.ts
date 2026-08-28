@@ -14,6 +14,7 @@ import type {
   ReadFilters,
 } from '../models/resources.js';
 import type { GamReadRepository } from '../repositories/read-repository.js';
+import { mapConcurrent } from '../../utils/concurrency.js';
 
 export type GamReadRepositoryProvider = (networkCode: string) => GamReadRepository;
 
@@ -47,6 +48,46 @@ export class GamReadService {
     options?: Partial<ListOptions>,
   ): Promise<ListResult<LineItem>> {
     return this.repository(networkCode).listLineItems(filters, this.options(options));
+  }
+
+  async listOrderLineItems(
+    networkCode: string | undefined,
+    orderId: string,
+    status: string | undefined,
+    options?: Partial<ListOptions>,
+  ) {
+    const repository = this.repository(networkCode);
+    const result = await repository.listLineItems(
+      { orderId, ...(status ? { status } : {}) },
+      this.options(options),
+    );
+    const pairs = targetingPairs(result.items);
+    const catalogResults = await mapConcurrent(pairs, this.config.gam.auditConcurrency, (pair) =>
+      repository
+        .getCustomTargeting({ id: pair.keyId, customTargetingValueId: pair.valueId }, { limit: 1 })
+        .then(
+          (value) => ({ status: 'fulfilled' as const, value }),
+          () => ({ status: 'rejected' as const }),
+        ),
+    );
+    const targetingCatalog = mergeTargetingCatalog(
+      catalogResults.flatMap((entry) => (entry.status === 'fulfilled' ? entry.value.items : [])),
+    );
+    const catalogWarnings = catalogResults.flatMap((entry) =>
+      entry.status === 'fulfilled' ? entry.value.warnings : [],
+    );
+    const catalogFailures = catalogResults.filter((entry) => entry.status === 'rejected').length;
+    return {
+      ...result,
+      targetingCatalog,
+      warnings: [
+        ...result.warnings,
+        ...catalogWarnings,
+        ...(catalogFailures > 0
+          ? [`${catalogFailures} custom targeting key(s) could not be resolved.`]
+          : []),
+      ],
+    };
   }
 
   getLineItem(networkCode: string | undefined, lineItemId: string): Promise<LineItem> {
@@ -128,4 +169,39 @@ export class GamReadService {
     }
     return { limit, ...(options.pageToken ? { pageToken: options.pageToken } : {}) };
   }
+}
+
+function targetingPairs(lineItems: LineItem[]): Array<{ keyId: string; valueId: string }> {
+  return [
+    ...new Map(
+      lineItems.flatMap((item) =>
+        item.targeting.customCriteria.flatMap((criterion) =>
+          criterion.keyId
+            ? criterion.valueIds.map(
+                (valueId) =>
+                  [
+                    `${criterion.keyId}:${valueId}`,
+                    { keyId: criterion.keyId as string, valueId },
+                  ] as const,
+              )
+            : [],
+        ),
+      ),
+    ).values(),
+  ];
+}
+
+function mergeTargetingCatalog(keys: CustomTargetingKey[]): CustomTargetingKey[] {
+  const byId = new Map<string, CustomTargetingKey>();
+  for (const key of keys) {
+    const existing = byId.get(key.id);
+    if (!existing) {
+      byId.set(key.id, { ...key, values: [...key.values] });
+      continue;
+    }
+    existing.values = [
+      ...new Map([...existing.values, ...key.values].map((value) => [value.id, value])).values(),
+    ];
+  }
+  return [...byId.values()];
 }

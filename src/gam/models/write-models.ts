@@ -40,6 +40,13 @@ export type LineItemCreate = {
   creativePlaceholderSizes: Size[];
   targeting: TargetingSummary;
   primaryGoal: PrimaryGoal;
+  creativeRotationType?: string;
+  deliveryRateType?: string;
+  deliveryForecastSource?: string;
+  roadblockingType?: string;
+  environmentType?: string;
+  sameAdvertiserExceptionEnabled?: boolean;
+  repeatedCreativeServingEnabled?: boolean;
   externalId?: string;
 };
 
@@ -59,6 +66,13 @@ export type LineItemUpdate = {
       | 'creativePlaceholderSizes'
       | 'targeting'
       | 'primaryGoal'
+      | 'creativeRotationType'
+      | 'deliveryRateType'
+      | 'deliveryForecastSource'
+      | 'roadblockingType'
+      | 'environmentType'
+      | 'sameAdvertiserExceptionEnabled'
+      | 'repeatedCreativeServingEnabled'
       | 'externalId'
     >
   >;
@@ -107,6 +121,13 @@ export type LineItemClone = {
       | 'unlimitedEndTime'
       | 'creativePlaceholderSizes'
       | 'targeting'
+      | 'creativeRotationType'
+      | 'deliveryRateType'
+      | 'deliveryForecastSource'
+      | 'roadblockingType'
+      | 'environmentType'
+      | 'sameAdvertiserExceptionEnabled'
+      | 'repeatedCreativeServingEnabled'
     >
   >;
 };

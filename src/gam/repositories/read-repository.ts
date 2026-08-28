@@ -185,6 +185,23 @@ export class DefaultGamReadRepository implements GamReadRepository {
     filters: ReadFilters,
     options: ListOptions,
   ): Promise<ListResult<CustomTargetingKey>> {
+    if (filters.id && filters.customTargetingValueId) {
+      const [key, value] = await Promise.all([
+        this.rest.get(
+          `${this.networkPath('customTargetingKeys')}/${encodeURIComponent(filters.id)}`,
+          normalizeCustomTargetingKey,
+        ),
+        this.rest.get(
+          `${this.networkPath('customTargetingValues')}/${encodeURIComponent(filters.customTargetingValueId)}`,
+          normalizeCustomTargetingValue,
+        ),
+      ]);
+      if (value.customTargetingKeyId && value.customTargetingKeyId !== key.id) {
+        throw new GamApiError('Custom Targeting value does not belong to the requested key.', 409);
+      }
+      key.values = [value];
+      return { items: [key], count: 1, limit: options.limit, truncated: false, warnings: [] };
+    }
     const keys = await this.rest.list({
       path: this.networkPath('customTargetingKeys'),
       collection: 'customTargetingKeys',
@@ -199,16 +216,14 @@ export class DefaultGamReadRepository implements GamReadRepository {
     });
     const enriched = await mapConcurrent(keys.items, this.concurrency, async (key) => {
       const values = await this.rest.list({
-        path: `${this.networkPath('customTargetingKeys')}/${encodeURIComponent(key.id)}/customTargetingValues`,
+        path: this.networkPath('customTargetingValues'),
         collection: 'customTargetingValues',
         normalize: normalizeCustomTargetingValue,
         limit: options.limit,
         pageSize: this.pageSize,
-        ...(filters.customTargetingValueId
-          ? {
-              filter: `name = ${quoteFilter(`networks/${this.networkCode}/customTargetingKeys/${key.id}/customTargetingValues/${filters.customTargetingValueId}`)}`,
-            }
-          : {}),
+        filter: filters.customTargetingValueId
+          ? `name = ${quoteFilter(`networks/${this.networkCode}/customTargetingValues/${filters.customTargetingValueId}`)} AND customTargetingKey = ${quoteFilter(`networks/${this.networkCode}/customTargetingKeys/${key.id}`)}`
+          : `customTargetingKey = ${quoteFilter(`networks/${this.networkCode}/customTargetingKeys/${key.id}`)}`,
       });
       key.values = values.items;
       return { key, warnings: values.warnings };
