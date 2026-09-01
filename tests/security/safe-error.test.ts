@@ -32,6 +32,19 @@ describe('safe error serialization', () => {
     });
   });
 
+  it('includes only the sanitized GAM API code in client errors', () => {
+    expect(
+      serializeSafeError(
+        new GamApiError('sensitive upstream message', 400, {
+          apiCode: 'LineItemError.INVALID_FIELD',
+        }),
+      ),
+    ).toEqual({
+      code: 'GAM_API_ERROR',
+      message: 'Google Ad Manager request failed (HTTP 400) (LineItemError.INVALID_FIELD).',
+    });
+  });
+
   it('returns safe validation details for Prebid input errors', () => {
     expect(serializeSafeError(new PrebidConfigInputError('Invalid priceGranularity.'))).toEqual({
       code: 'PREBID_CONFIG_INVALID',

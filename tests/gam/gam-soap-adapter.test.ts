@@ -71,4 +71,37 @@ describe('GamSoapAdapter', () => {
     expect(requests[1]?.body).toContain('LIMIT 1 OFFSET 1');
     expect(requests.map((request) => request.body).join('')).not.toMatch(/create|update|delete/i);
   });
+
+  it('extracts a safe GAM error code from SOAP faults', async () => {
+    const http: HttpClient = {
+      request: async () => ({
+        ok: false,
+        status: 400,
+        headers: new Headers(),
+        json: async () => ({}),
+        text: async () => `<?xml version="1.0"?>
+          <soapenv:Fault xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+            <detail><errors><errorString>LineItemError.INVALID_FIELD</errorString></errors></detail>
+          </soapenv:Fault>`,
+      }),
+    };
+    const adapter = new GamSoapAdapter(auth, http, noopLogger, {
+      networkCode: '12345678',
+      apiVersion: 'v202608',
+      applicationName: 'test',
+      timeoutMs: 100,
+      maxRetries: 0,
+      pageSize: 1,
+    });
+
+    await expect(
+      adapter.mutate({
+        service: 'LineItemService',
+        method: 'updateLineItems',
+        parameter: 'lineItems',
+        values: [{ id: '1' }],
+        retrySafe: true,
+      }),
+    ).rejects.toMatchObject({ apiCode: 'LineItemError.INVALID_FIELD' });
+  });
 });

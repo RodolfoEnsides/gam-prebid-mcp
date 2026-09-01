@@ -21,7 +21,7 @@ describe('DefaultGamWriteRepository Line Item payloads', () => {
       creativeRotationType: 'OPTIMIZED',
       deliveryRateType: 'EVENLY',
       deliveryForecastSource: 'HISTORICAL',
-      sameAdvertiserExceptionEnabled: true,
+      disableSameAdvertiserCompetitiveExclusion: true,
       creativePlaceholders: [
         {
           size: { width: 1, height: 1 },
@@ -85,11 +85,69 @@ describe('DefaultGamWriteRepository Line Item payloads', () => {
       orderId: '4030556299',
       name: 'Prebid - banner - 0.21',
       costPerUnit: { currencyCode: 'USD', microAmount: '210000' },
-      sameAdvertiserExceptionEnabled: true,
+      disableSameAdvertiserCompetitiveExclusion: true,
       targeting: source.targeting,
     });
     expect(payload).not.toHaveProperty('id');
     expect(payload).not.toHaveProperty('status');
+  });
+
+  it('maps the public same-advertiser setting to the SOAP update field', async () => {
+    const mutate = vi.fn(async (input: unknown) => {
+      void input;
+      return [{ ...soapLineItem(), disableSameAdvertiserCompetitiveExclusion: true }];
+    });
+    const repository = new DefaultGamWriteRepository({ mutate } as unknown as GamSoapAdapter);
+    const raw = soapLineItem();
+    Object.assign(raw, {
+      orderName: 'Prebid Header Bidding',
+      reservationStatus: 'UNRESERVED',
+      isMissingCreatives: false,
+      lastModifiedByApp: 'gam-prebid-mcp',
+      targeting: {
+        customTargeting: {
+          '@_xsi:type': 'CustomCriteriaSet',
+          logicalOperator: 'AND',
+          children: [
+            {
+              '@_xsi:type': 'CustomCriteria',
+              keyId: '11890116',
+              valueIds: ['448095198807'],
+              operator: 'IS',
+            },
+          ],
+        },
+      },
+    });
+
+    await repository.updateLineItem(
+      { resource: normalizedLineItem(), raw },
+      {
+        lineItemId: '7401192891',
+        patch: { sameAdvertiserExceptionEnabled: true },
+      },
+    );
+
+    const payload = (mutate.mock.calls[0]?.[0] as { values: Record<string, unknown>[] }).values[0];
+    expect(payload).toMatchObject({
+      id: '7401192891',
+      orderId: '4030556299',
+      disableSameAdvertiserCompetitiveExclusion: true,
+    });
+    expect(payload).not.toHaveProperty('sameAdvertiserExceptionEnabled');
+    expect(payload).not.toHaveProperty('orderName');
+    expect(payload).not.toHaveProperty('reservationStatus');
+    expect(payload).not.toHaveProperty('isMissingCreatives');
+    expect(payload).not.toHaveProperty('lastModifiedByApp');
+    expect(payload).toMatchObject({
+      targeting: {
+        customTargeting: {
+          __type: 'CustomCriteriaSet',
+          children: [{ __type: 'CustomCriteria' }],
+        },
+      },
+    });
+    expect(JSON.stringify(payload)).not.toContain('@_xsi:type');
   });
 });
 

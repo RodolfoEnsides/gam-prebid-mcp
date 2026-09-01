@@ -29,6 +29,15 @@ describe('normalizeLineItem', () => {
     expect(lineItem.costPerUnit).toEqual({ currencyCode: 'USD', micros: '200000' });
   });
 
+  it('normalizes the SOAP same-advertiser competitive exclusion field', () => {
+    const lineItem = normalizeLineItem({
+      ...baseLineItem,
+      disableSameAdvertiserCompetitiveExclusion: true,
+    });
+
+    expect(lineItem.sameAdvertiserExceptionEnabled).toBe(true);
+  });
+
   it('normalizes the real REST Line Item shape without losing targeting semantics', () => {
     const lineItem = normalizeLineItem({
       ...baseLineItem,

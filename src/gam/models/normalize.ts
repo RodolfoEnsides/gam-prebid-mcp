@@ -278,6 +278,10 @@ export function normalizeLineItem(value: unknown): LineItem {
   const object = asRecord(value);
   const name = stringValue(object.name) ?? '';
   const order = stringValue(object.order) ?? '';
+  // REST v1 exposes this setting as `sameAdvertiserExceptionEnabled`, while
+  // the SOAP API calls the same setting `disableSameAdvertiserCompetitiveExclusion`.
+  const sameAdvertiserException =
+    object.sameAdvertiserExceptionEnabled ?? object.disableSameAdvertiserCompetitiveExclusion;
   // REST v1 names the Line Item billing amount `rate`, while SOAP names the
   // same value `costPerUnit`. Reads use REST and writes use SOAP, so normalize
   // both representations into the shared model.
@@ -353,9 +357,9 @@ export function normalizeLineItem(value: unknown): LineItem {
     ...(stringValue(object.environmentType)
       ? { environmentType: stringValue(object.environmentType) }
       : {}),
-    ...(object.sameAdvertiserExceptionEnabled !== undefined
+    ...(sameAdvertiserException !== undefined
       ? {
-          sameAdvertiserExceptionEnabled: booleanValue(object.sameAdvertiserExceptionEnabled),
+          sameAdvertiserExceptionEnabled: booleanValue(sameAdvertiserException),
         }
       : {}),
     ...(object.repeatedCreativeServingEnabled !== undefined

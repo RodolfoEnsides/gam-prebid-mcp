@@ -26,12 +26,13 @@ export function serializeSafeError(error: unknown): SafeError {
     return { code: 'POST_WRITE_VERIFICATION_FAILED', message: error.message };
   }
   if (error instanceof GamApiError) {
+    const apiCode = error.apiCode && error.apiCode !== 'SOAP_FAULT' ? ` (${error.apiCode})` : '';
     return {
       code: error.status === 429 ? 'GAM_RATE_LIMITED' : 'GAM_API_ERROR',
       message:
         error.status === 429
           ? 'Google Ad Manager rate limit was reached. Try again later.'
-          : `Google Ad Manager request failed (HTTP ${error.status}).`,
+          : `Google Ad Manager request failed (HTTP ${error.status})${apiCode}.`,
     };
   }
   return { code: 'INTERNAL_ERROR', message: 'The operation failed safely. Check server logs.' };

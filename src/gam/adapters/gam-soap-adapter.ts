@@ -192,7 +192,7 @@ export class GamSoapAdapter implements GamAdapter {
     const body = await response.text();
     if (/<(?:\w+:)?Fault[\s>]/i.test(body)) {
       return new GamApiError('GAM SOAP request returned a fault.', 400, {
-        apiCode: 'SOAP_FAULT',
+        apiCode: soapApiCode(body),
       });
     }
     const retryAfter = response.headers.get('retry-after');
@@ -205,6 +205,14 @@ export class GamSoapAdapter implements GamAdapter {
       },
     );
   }
+}
+
+function soapApiCode(body: string): string {
+  const value = body.match(/<(?:\w+:)?errorString>([^<]+)<\/(?:\w+:)?errorString>/i)?.[1];
+  const normalized = value?.trim();
+  return normalized && /^[A-Za-z][A-Za-z0-9_.]{0,127}$/.test(normalized)
+    ? normalized
+    : 'SOAP_FAULT';
 }
 
 function orderFieldFor(service: SoapService): string {
