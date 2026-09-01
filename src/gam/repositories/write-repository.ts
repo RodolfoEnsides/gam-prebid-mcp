@@ -320,10 +320,14 @@ const orderReadOnlyFields = [
 
 const lineItemReadOnlyFields = [
   'id',
+  'orderName',
   'status',
+  'reservationStatus',
   'isArchived',
+  'isMissingCreatives',
   'creationDateTime',
   'lastModifiedDateTime',
+  'lastModifiedByApp',
   'stats',
   'deliveryData',
   'budget',
@@ -381,7 +385,9 @@ function lineItemPayload(input: LineItemCreate): Record<string, unknown> {
     ...(input.roadblockingType ? { roadblockingType: input.roadblockingType } : {}),
     ...(input.environmentType ? { environmentType: input.environmentType } : {}),
     ...(input.sameAdvertiserExceptionEnabled !== undefined
-      ? { sameAdvertiserExceptionEnabled: input.sameAdvertiserExceptionEnabled }
+      ? {
+          disableSameAdvertiserCompetitiveExclusion: input.sameAdvertiserExceptionEnabled,
+        }
       : {}),
     ...(input.repeatedCreativeServingEnabled !== undefined
       ? { repeatedCreativeServingEnabled: input.repeatedCreativeServingEnabled }
@@ -424,7 +430,9 @@ function lineItemPatch(patch: LineItemUpdate['patch']): Record<string, unknown> 
     ...(patch.roadblockingType !== undefined ? { roadblockingType: patch.roadblockingType } : {}),
     ...(patch.environmentType !== undefined ? { environmentType: patch.environmentType } : {}),
     ...(patch.sameAdvertiserExceptionEnabled !== undefined
-      ? { sameAdvertiserExceptionEnabled: patch.sameAdvertiserExceptionEnabled }
+      ? {
+          disableSameAdvertiserCompetitiveExclusion: patch.sameAdvertiserExceptionEnabled,
+        }
       : {}),
     ...(patch.repeatedCreativeServingEnabled !== undefined
       ? { repeatedCreativeServingEnabled: patch.repeatedCreativeServingEnabled }
@@ -562,14 +570,23 @@ function clonePayload(
 }
 
 function cleanRaw(raw: Record<string, unknown>): Record<string, unknown> {
-  const result = structuredClone(raw);
+  return cleanSoapNode(raw) as Record<string, unknown>;
+}
+
+function cleanSoapNode(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => cleanSoapNode(item));
+  if (value === null || typeof value !== 'object') return value;
+
+  const object = value as Record<string, unknown>;
   const attributes =
-    raw['@'] && typeof raw['@'] === 'object' ? (raw['@'] as Record<string, unknown>) : {};
-  const type = raw['@_type'] ?? raw['@_xsi:type'] ?? attributes['xsi:type'];
+    object['@'] && typeof object['@'] === 'object' ? (object['@'] as Record<string, unknown>) : {};
+  const type = object['@_type'] ?? object['@_xsi:type'] ?? attributes['xsi:type'];
+  const result: Record<string, unknown> = {};
   if (typeof type === 'string') result.__type = type.split(':').at(-1);
-  delete result['@'];
-  for (const key of Object.keys(result)) {
-    if (key.startsWith('@_')) delete result[key];
+
+  for (const [key, item] of Object.entries(object)) {
+    if (key === '@' || key.startsWith('@_')) continue;
+    result[key] = cleanSoapNode(item);
   }
   return result;
 }
